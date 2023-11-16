@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import os
 import time
+import requests
 from random import randint
 from datetime import datetime
 from selenium import webdriver
@@ -13,16 +14,22 @@ from selenium.common.exceptions import ElementClickInterceptedException, StaleEl
 from srt_reservation.exceptions import InvalidStationNameError, InvalidDateError, InvalidDateFormatError, InvalidTimeFormatError
 from srt_reservation.validation import station_list
 
-chromedriver_path = r'C:\workspace\chromedriver.exe'
+# chromedriver_path = r'C:\workspace\chromedriver.exe'
+# 맥 os에 맞는 path로 수정
+chromedriver_path = '/usr/local/bin/chromedriver'
+
+# 슬랙 웹훅 주소. 없을시 빈 url 주소인 "" 로 변경해주세요.
+slack_webhook_url = 'https://hooks.slack.com/services/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'
 
 class SRT:
-    def __init__(self, dpt_stn, arr_stn, dpt_dt, dpt_tm, num_trains_to_check=2, want_reserve=False):
+    def __init__(self, dpt_stn, arr_stn, dpt_dt, dpt_tm, num_trains_to_check=2, num_trains_to_check_start = 1, want_reserve=False):
         """
         :param dpt_stn: SRT 출발역
         :param arr_stn: SRT 도착역
         :param dpt_dt: 출발 날짜 YYYYMMDD 형태 ex) 20220115
         :param dpt_tm: 출발 시간 hh 형태, 반드시 짝수 ex) 06, 08, 14, ...
         :param num_trains_to_check: 검색 결과 중 예약 가능 여부 확인할 기차의 수 ex) 2일 경우 상위 2개 확인
+        :param num_trains_to_check_start: 검색 결과 중 예약 가능 여부 확인할 기차의 수 검색 시작 지점
         :param want_reserve: 예약 대기가 가능할 경우 선택 여부
         """
         self.login_id = None
@@ -34,6 +41,7 @@ class SRT:
         self.dpt_tm = dpt_tm
 
         self.num_trains_to_check = num_trains_to_check
+        self.num_trains_to_check_start = num_trains_to_check_start
         self.want_reserve = want_reserve
         self.driver = None
 
@@ -134,12 +142,25 @@ class SRT:
             # 예약이 성공하면
             if self.driver.find_elements(By.ID, 'isFalseGotoMain'):
                 self.is_booked = True
+                
+                self.send_message("예약 성공!")
                 print("예약 성공")
+
                 return self.driver
             else:
                 print("잔여석 없음. 다시 검색")
                 self.driver.back()  # 뒤로가기
                 self.driver.implicitly_wait(5)
+
+    # 슬랙봇 연동
+    def send_message(self, msg):
+        if slack_webhook_url != "" :
+            url=slack_webhook_url
+            data = {'text':msg}
+            resp = requests.post(url=url, json=data)
+            return resp
+
+                
 
     def refresh_result(self):
         submit = self.driver.find_element(By.XPATH, "//input[@value='조회하기']")
@@ -159,7 +180,7 @@ class SRT:
 
     def check_result(self):
         while True:
-            for i in range(1, self.num_trains_to_check+1):
+            for i in range(self.num_trains_to_check_start, self.num_trains_to_check+1):
                 try:
                     standard_seat = self.driver.find_element(By.CSS_SELECTOR, f"#result-form > fieldset > div.tbl_wrap.th_thead > table > tbody > tr:nth-child({i}) > td:nth-child(7)").text
                     reservation = self.driver.find_element(By.CSS_SELECTOR, f"#result-form > fieldset > div.tbl_wrap.th_thead > table > tbody > tr:nth-child({i}) > td:nth-child(8)").text
