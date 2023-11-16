@@ -19,7 +19,7 @@ from srt_reservation.validation import station_list
 chromedriver_path = '/usr/local/bin/chromedriver'
 
 # 슬랙 웹훅 주소. 없을시 빈 url 주소인 "" 로 변경해주세요.
-slack_webhook_url = 'https://hooks.slack.com/services/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'
+slack_webhook_url = 'https://hooks.slack.com/services/~~~'
 
 class SRT:
     def __init__(self, dpt_stn, arr_stn, dpt_dt, dpt_tm, num_trains_to_check=2, num_trains_to_check_start = 1, want_reserve=False):
