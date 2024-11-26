@@ -5,29 +5,35 @@ import requests
 from random import randint
 from datetime import datetime
 from selenium import webdriver
-from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.select import Select
 from selenium.common.exceptions import ElementClickInterceptedException, StaleElementReferenceException, WebDriverException
+from webdriver_manager.chrome import ChromeDriverManager
+import platform
+import logging
+import shutil
 
 from srt_reservation.exceptions import InvalidStationNameError, InvalidDateError, InvalidDateFormatError, InvalidTimeFormatError
 from srt_reservation.validation import station_list
 
 # chromedriver_path = r'C:\workspace\chromedriver.exe'
 # 맥 os에 맞는 path로 수정
-chromedriver_path = '/usr/local/bin/chromedriver'
+# chromedriver_path = '/usr/local/bin/chromedriver'
 
 # 슬랙 웹훅 주소. 없을시 빈 url 주소인 "" 로 변경해주세요.
-slack_webhook_url = 'https://hooks.slack.com/services/~~~'
+slack_webhook_url = 'https://hooks.slack.com/services/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'
 
 class SRT:
-    def __init__(self, dpt_stn, arr_stn, dpt_dt, dpt_tm, num_trains_to_check=2, num_trains_to_check_start = 1, want_reserve=False):
+    def __init__(self, dpt_stn, arr_stn, dpt_dt, dpt_tm, psg_info_per_prnb=1, num_trains_to_check=2, num_trains_to_check_start = 1, want_reserve=False):
         """
         :param dpt_stn: SRT 출발역
         :param arr_stn: SRT 도착역
         :param dpt_dt: 출발 날짜 YYYYMMDD 형태 ex) 20220115
         :param dpt_tm: 출발 시간 hh 형태, 반드시 짝수 ex) 06, 08, 14, ...
+        :param psg_info_per_prnb: 성인 인원 수 ex) 1, 2, 3, ...
         :param num_trains_to_check: 검색 결과 중 예약 가능 여부 확인할 기차의 수 ex) 2일 경우 상위 2개 확인
         :param num_trains_to_check_start: 검색 결과 중 예약 가능 여부 확인할 기차의 수 검색 시작 지점
         :param want_reserve: 예약 대기가 가능할 경우 선택 여부
@@ -39,6 +45,7 @@ class SRT:
         self.arr_stn = arr_stn
         self.dpt_dt = dpt_dt
         self.dpt_tm = dpt_tm
+        self.psg_info_per_prnb = psg_info_per_prnb
 
         self.num_trains_to_check = num_trains_to_check
         self.num_trains_to_check_start = num_trains_to_check_start
@@ -68,9 +75,43 @@ class SRT:
 
     def run_driver(self):
         try:
-            self.driver = webdriver.Chrome(executable_path=chromedriver_path)
-        except WebDriverException:
-            self.driver = webdriver.Chrome(ChromeDriverManager().install())
+            # 기존 ChromeDriver 캐시 제거
+            cache_path = os.path.expanduser('~/.wdm/drivers/chromedriver')
+            if os.path.exists(cache_path):
+                shutil.rmtree(cache_path)
+            
+            # Chrome 옵션 설정
+            chrome_options = Options()
+            chrome_options.add_argument('--no-sandbox')
+            chrome_options.add_argument('--disable-dev-shm-usage')
+            
+            # M1/M2 Mac 확인 및 설정
+            if platform.system() == "Darwin" and platform.processor() == 'arm':
+                chrome_options.add_argument('--disable-gpu')
+                os.environ['WDM_ARCHITECTURE'] = 'arm64'  # 명시적으로 arm64 아키텍처 지정
+            
+            # ChromeDriver 설치 및 서비스 설정
+            driver_path = ChromeDriverManager().install()
+            
+            # 실행 권한 확인 및 부여
+            os.chmod(driver_path, 0o755)
+            
+            service = Service(driver_path)
+            
+            print(f"ChromeDriver 경로: {driver_path}")
+            print(f"시스템 아키텍처: {platform.processor()}")
+            
+            self.driver = webdriver.Chrome(
+                service=service,
+                options=chrome_options
+            )
+            
+        except Exception as e:
+            print(f"ChromeDriver 초기화 실패: {str(e)}")
+            print(f"운영체제: {platform.system()}")
+            print(f"프로세서: {platform.processor()}")
+            print(f"Python 버전: {platform.python_version()}")
+            raise e
 
     def login(self):
         self.driver.get('https://etk.srail.co.kr/cmc/01/selectLoginForm.do')
@@ -112,6 +153,10 @@ class SRT:
         elm_dpt_tm = self.driver.find_element(By.ID, "dptTm")
         self.driver.execute_script("arguments[0].setAttribute('style','display: True;')", elm_dpt_tm)
         Select(self.driver.find_element(By.ID, "dptTm")).select_by_visible_text(self.dpt_tm)
+
+        # 성인 인원 수 입력
+        elm_psg_info_per_prnb = self.driver.find_element(By.ID, "psgInfoPerPrnb1")
+        Select(self.driver.find_element(By.ID, "psgInfoPerPrnb1")).select_by_value(str(self.psg_info_per_prnb))
 
         print("기차를 조회합니다")
         print(f"출발역:{self.dpt_stn} , 도착역:{self.arr_stn}\n날짜:{self.dpt_dt}, 시간: {self.dpt_tm}시 이후\n{self.num_trains_to_check}개의 기차 중 예약")
