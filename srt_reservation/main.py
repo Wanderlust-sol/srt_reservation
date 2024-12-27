@@ -12,6 +12,9 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.select import Select
 from selenium.common.exceptions import ElementClickInterceptedException, StaleElementReferenceException, WebDriverException
 from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException
 import platform
 import logging
 import shutil
@@ -24,7 +27,7 @@ from srt_reservation.validation import station_list
 # chromedriver_path = '/usr/local/bin/chromedriver'
 
 # 슬랙 웹훅 주소. 없을시 빈 url 주소인 "" 로 변경해주세요.
-slack_webhook_url = 'https://hooks.slack.com/services/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'
+slack_webhook_url = 'https://hooks.slack.com/services/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'
 
 class SRT:
     def __init__(self, dpt_stn, arr_stn, dpt_dt, dpt_tm, psg_info_per_prnb=1, num_trains_to_check=2, num_trains_to_check_start = 1, want_reserve=False):
@@ -199,11 +202,23 @@ class SRT:
 
     # 슬랙봇 연동
     def send_message(self, msg):
-        if slack_webhook_url != "" :
-            url=slack_webhook_url
-            data = {'text':msg}
-            resp = requests.post(url=url, json=data)
-            return resp
+        if slack_webhook_url != "":
+            try:
+                url = slack_webhook_url
+                data = {'text': msg}
+                response = requests.post(url=url, json=data)
+                
+                # 응답 상태 확인
+                if response.status_code != 200:
+                    print(f"슬랙 메시지 전송 실패. 상태 코드: {response.status_code}")
+                    print(f"에러 메시지: {response.text}")
+                else:
+                    print("슬랙 메시지 전송 성공")
+                    
+            except Exception as e:
+                print(f"슬랙 메시지 전송 중 에러 발생: {str(e)}")
+        else:
+            print("슬랙 웹훅 URL이 설정되지 않았습니다.")
 
                 
 
@@ -225,25 +240,43 @@ class SRT:
 
     def check_result(self):
         while True:
-            for i in range(self.num_trains_to_check_start, self.num_trains_to_check+1):
-                try:
-                    standard_seat = self.driver.find_element(By.CSS_SELECTOR, f"#result-form > fieldset > div.tbl_wrap.th_thead > table > tbody > tr:nth-child({i}) > td:nth-child(7)").text
-                    reservation = self.driver.find_element(By.CSS_SELECTOR, f"#result-form > fieldset > div.tbl_wrap.th_thead > table > tbody > tr:nth-child({i}) > td:nth-child(8)").text
-                except StaleElementReferenceException:
-                    standard_seat = "매진"
-                    reservation = "매진"
+            try:
+                # 명시적으로 테이블이 나타날 때까지 최대 10초 대기
+                table = WebDriverWait(self.driver, 10).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, "#result-form > fieldset > div.tbl_wrap.th_thead > table > tbody"))
+                )
+            
+                for i in range(self.num_trains_to_check_start, self.num_trains_to_check+1):
+                    try:
+                        # 각 행이 클릭 가능할 때까지 대기
+                        row = WebDriverWait(self.driver, 5).until(
+                            EC.presence_of_element_located((By.CSS_SELECTOR, 
+                                f"#result-form > fieldset > div.tbl_wrap.th_thead > table > tbody > tr:nth-child({i})"))
+                        )
+                        
+                        standard_seat = row.find_element(By.CSS_SELECTOR, "td:nth-child(7)").text
+                        reservation = row.find_element(By.CSS_SELECTOR, "td:nth-child(8)").text
+                    
+                    except (StaleElementReferenceException, TimeoutException):
+                        print(f"{i}번째 열을 찾을 수 없습니다.")
+                        standard_seat = "매진"
+                        reservation = "매진"
+                        continue
 
-                if self.book_ticket(standard_seat, i):
+                    if self.book_ticket(standard_seat, i):
+                        return self.driver
+
+                    if self.want_reserve:
+                        self.reserve_ticket(reservation, i)
+
+                if self.is_booked:
                     return self.driver
-
-                if self.want_reserve:
-                    self.reserve_ticket(reservation, i)
-
-            if self.is_booked:
-                return self.driver
-
-            else:
-                time.sleep(randint(2, 4))
+                else:
+                    time.sleep(randint(2, 4))
+                    self.refresh_result()
+                
+            except TimeoutException:
+                print("검색 결과 테이블을 찾을 수 없습니다. 새로고침합니다.")
                 self.refresh_result()
 
     def run(self, login_id, login_psw):
