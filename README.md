@@ -26,6 +26,7 @@ pip install -r requirements.txt
     arr: SRT 도착역
     dt: 출발 날짜 YYYYMMDD 형태 ex) 20220115
     tm: 출발 시간 hh 형태, 반드시 짝수 ex) 06, 08, 14, ...
+    ps: 승객 인원수 (default: 1)
     num: 검색 결과 중 예약 가능 여부 확인할 기차의 수 (default : 2)
     num_s: 검색 결과 중 예약 가능 여부 확인할 기차의 시작 지점 (default : 1)
     reserve: 예약 대기가 가능할 경우 선택 여부 (default : False)
@@ -56,6 +57,12 @@ python quickstart.py --user 1234567890 --psw 000000 --dpt 동탄 --arr 동대구
 
 ```cmd
 python quickstart.py --user 1234567890 --psw 000000 --dpt 동탄 --arr 동대구 --dt 20220117 --tm 08 --num 5 --num_s 3
+```
+
+검색 결과 중 8시 이후 승객 2명 예약 하고 싶을 경우
+
+```cmd
+python quickstart.py --user 1234567890 --psw 000000 --dpt 동탄 --arr 동대구 --dt 20220117 --tm 08 --ps 2
 ```
 
 **실행 결과**
